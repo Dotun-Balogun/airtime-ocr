@@ -64,7 +64,7 @@ export default function Scanner({ onCapture }: { onCapture: (b: Blob) => void })
             <input
               type="file"
               accept="image/*"
-              capture="environment"
+              // capture="environment"
               className="hidden"
               onChange={(e) => e.target.files?.[0] && onCapture(e.target.files[0])}
             />
