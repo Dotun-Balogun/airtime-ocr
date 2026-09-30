@@ -1,11 +1,19 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-type Rect = { x: number; y: number; w: number; h: number }; // 0..1 fractions of the image
+type Rect = { x: number; y: number; w: number; h: number }; // 0..1 fractions of the display box
 const MIN = 0.06;
 const clamp = (v: number, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 
-/** Lets the user drag a crop box over the captured photo, rotate it, retake, or confirm. */
+/** Scale needed so a rotated image still fully covers its own (unrotated) bounding box. */
+function coverScale(w: number, h: number, deg: number) {
+  const r = (deg * Math.PI) / 180;
+  const rw = w * Math.abs(Math.cos(r)) + h * Math.abs(Math.sin(r));
+  const rh = w * Math.abs(Math.sin(r)) + h * Math.abs(Math.cos(r));
+  return Math.max(rw / w, rh / h);
+}
+
+/** Lets the user drag a crop box over the captured photo, straighten it gradually, retake, or confirm. */
 export default function Cropper({
   src,
   onRetake,
@@ -17,11 +25,15 @@ export default function Cropper({
 }) {
   const imgRef = useRef<HTMLImageElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
+  const [natural, setNatural] = useState({ w: 1, h: 1 });
   const [rect, setRect] = useState<Rect>({ x: 0.1, y: 0.35, w: 0.8, h: 0.3 });
-  const [rotation, setRotation] = useState(0); // 0 | 90 | 180 | 270
+  const [angle, setAngle] = useState(0); // continuous degrees, e.g. -45..45
   const drag = useRef<{ mode: string; startX: number; startY: number; start: Rect } | null>(null);
 
-  useEffect(() => setRect({ x: 0.1, y: 0.35, w: 0.8, h: 0.3 }), [src]);
+  useEffect(() => {
+    setRect({ x: 0.1, y: 0.35, w: 0.8, h: 0.3 });
+    setAngle(0);
+  }, [src]);
 
   function pointerDown(mode: string) {
     return (e: React.PointerEvent) => {
@@ -63,25 +75,29 @@ export default function Cropper({
 
   async function confirm() {
     const img = imgRef.current!;
-    const rotated = document.createElement("canvas");
-    const sw = rotation % 180 === 0 ? img.naturalWidth : img.naturalHeight;
-    const sh = rotation % 180 === 0 ? img.naturalHeight : img.naturalWidth;
-    rotated.width = sw;
-    rotated.height = sh;
-    const rctx = rotated.getContext("2d")!;
-    rctx.translate(sw / 2, sh / 2);
-    rctx.rotate((rotation * Math.PI) / 180);
-    rctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    const { naturalWidth: nw, naturalHeight: nh } = img;
+    // Render exactly what's on screen: image scaled to fill the display box, then rotated.
+    const k = Math.min(1, 1600 / nw);
+    const W = Math.round(nw * k), H = Math.round(nh * k);
+    const scale = coverScale(W, H, angle);
 
-    const sx = rect.x * sw, sy = rect.y * sh, cw = rect.w * sw, ch = rect.h * sh;
-    // Upscale small crops so tiny printed PINs give OCR more pixels to work with.
-    const scale = Math.max(1, Math.min(3, 1100 / cw));
+    const stage = document.createElement("canvas");
+    stage.width = W;
+    stage.height = H;
+    const sctx = stage.getContext("2d")!;
+    sctx.translate(W / 2, H / 2);
+    sctx.rotate((angle * Math.PI) / 180);
+    sctx.scale(scale, scale);
+    sctx.drawImage(img, -W / 2, -H / 2, W, H);
+
+    const sx = rect.x * W, sy = rect.y * H, cw = rect.w * W, ch = rect.h * H;
+    const up = Math.max(1, Math.min(3, 1100 / cw)); // upscale small crops for OCR
     const out = document.createElement("canvas");
-    out.width = Math.round(cw * scale);
-    out.height = Math.round(ch * scale);
+    out.width = Math.round(cw * up);
+    out.height = Math.round(ch * up);
     const octx = out.getContext("2d")!;
     octx.imageSmoothingQuality = "high";
-    octx.drawImage(rotated, sx, sy, cw, ch, 0, 0, out.width, out.height);
+    octx.drawImage(stage, sx, sy, cw, ch, 0, 0, out.width, out.height);
     out.toBlob((b) => b && onConfirm(b), "image/jpeg", 0.95);
   }
 
@@ -99,28 +115,27 @@ export default function Cropper({
 
   return (
     <div className="space-y-3">
-      <div ref={boxRef} className="relative touch-none overflow-hidden rounded-xl bg-black select-none" onPointerMove={pointerMove} onPointerUp={pointerUp}>
+      <div
+        ref={boxRef}
+        className="relative touch-none overflow-hidden rounded-xl bg-black select-none"
+        style={{ aspectRatio: `${natural.w} / ${natural.h}` }}
+        onPointerMove={pointerMove}
+        onPointerUp={pointerUp}
+      >
         <img
           ref={imgRef}
           src={src}
           alt="Captured card"
           draggable={false}
-          className="block w-full"
-          style={{ transform: `rotate(${rotation}deg)`, transformOrigin: "center" }}
+          onLoad={(e) => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+          className="absolute inset-0 h-full w-full"
+          style={{ transform: `rotate(${angle}deg) scale(${coverScale(natural.w, natural.h, angle)})`, transformOrigin: "center" }}
         />
         <div className="pointer-events-none absolute inset-0 bg-black/55" />
         <div
           onPointerDown={pointerDown("move")}
           className="absolute cursor-move touch-none border-2 border-emerald-400"
-          style={{
-            left: `${rect.x * 100}%`,
-            top: `${rect.y * 100}%`,
-            width: `${rect.w * 100}%`,
-            height: `${rect.h * 100}%`,
-            boxShadow: "0 0 0 9999px rgba(0,0,0,0)",
-            backgroundColor: "rgba(0,0,0,0)",
-            backdropFilter: "brightness(1.6)",
-          }}
+          style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%`, backdropFilter: "brightness(1.6)" }}
         >
           {handle("nw", "nwse-resize")}
           {handle("ne", "nesw-resize")}
@@ -132,10 +147,27 @@ export default function Cropper({
           {handle("e", "ew-resize")}
         </div>
       </div>
+
+      <label className="block text-sm text-slate-300">
+        Straighten {angle.toFixed(1)}°
+        <input
+          type="range"
+          min={-45}
+          max={45}
+          step={0.5}
+          value={angle}
+          onChange={(e) => setAngle(Number(e.target.value))}
+          className="mt-1 w-full"
+        />
+      </label>
+
       <p className="text-center text-xs text-slate-400">Drag the box edges so it hugs just the PIN digits, then Scan.</p>
       <div className="flex flex-wrap gap-2">
-        <button onClick={() => setRotation((r) => (r + 90) % 360)} className="rounded-xl bg-slate-700 px-4 py-3 font-semibold">
-          Rotate
+        <button onClick={() => setAngle((a) => ((a + 90 + 180) % 360) - 180)} className="rounded-xl bg-slate-700 px-4 py-3 font-semibold">
+          Rotate 90°
+        </button>
+        <button onClick={() => setAngle(0)} className="rounded-xl bg-slate-700 px-4 py-3 font-semibold">
+          Reset angle
         </button>
         <button onClick={onRetake} className="rounded-xl bg-slate-700 px-4 py-3 font-semibold">
           Retake photo
