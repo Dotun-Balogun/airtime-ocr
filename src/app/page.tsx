@@ -120,12 +120,12 @@ export default function Home() {
         </div>
       )}
 
-      {stage === "capture" && (
-        <label className="flex items-center gap-2 text-sm text-slate-300">
-          <input type="checkbox" checked={cloudOn} onChange={(e) => setCloudOn(e.target.checked)} />
-          Use cloud OCR when unsure (sends the cropped photo to Google)
-        </label>
-      )}
+      {/* stage === "capture" && (
+  <label className="flex items-center gap-2 text-sm text-slate-300">
+    <input type="checkbox" checked={cloudOn} onChange={(e) => setCloudOn(e.target.checked)} />
+    Use cloud OCR when unsure (sends the cropped photo to Google)
+  </label>
+) */}
 
       {stage === "review" && (
         <section className="space-y-3 rounded-2xl bg-slate-800/60 p-4">
