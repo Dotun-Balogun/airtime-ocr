@@ -140,7 +140,7 @@ export default function Home() {
             <input
               inputMode="numeric"
               value={formatPin(pin)}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 16))}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 17))}
               placeholder="Scan or type the PIN"
               className="mt-1 w-full rounded-lg bg-slate-900 p-3 font-mono text-lg tracking-wider"
             />
